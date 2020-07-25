@@ -11,7 +11,8 @@ OPTIONS = {
 	:skipAPI => false,
 	:node => nil,
 	:verbose => false,
-	:debug => false
+	:debug => false,
+	:profile => false
 }
 
 # returns the ID of the node created
@@ -79,67 +80,8 @@ def p_createNodeAndChildren (db, node, primaryParentID, prefix)
 	return nodeID
 end
 
+def p_createIndex(docsetPath)
 
-
-# Works similar to docsetutil
-# See http://www.manpagez.com/man/1/docsetutil/ though we dont support all verbs
-HELP_BANNER="Usage: doxysetutil [verb] [options] [docsetpath]"
-if ARGV.count == 0
-	STDERR.puts HELP_BANNER
-	exit 1
-end
-
-parser = OptionParser.new do |parser|
-	parser.banner = HELP_BANNER
-	parser.on '-localization=LOC', 'Perform the operation using a particular localization' do |localization|
-		OPTIONS[:localization] = localization
-	end
-
-	parser.on '-skip-text', 'Do not perform the operation for the full-text index.' do |skipText|
-		OPTIONS[:skipText] = skipText
-	end
-
-	parser.on '-skip-api', 'Do not perform the operation for the API index.' do |skipAPI|
-		OPTIONS[:skipAPI] = skipAPI
-	end
-
-	parser.on '-node=NODEPATH', 'Perform the operation only on the documents that reside at or below a location via a : named list' do |node|
-		OPTIONS[:node] = node
-	end
-	
-	parser.on '-verbose', 'Print out addictional information about the operation being performed.' do |v|
-		OPTIONS[:verbose] = v
-	end
-	
-	parser.on '-debug', 'Print out debugging information' do |d|
-		OPTIONS[:debug] = d
-	end
-end
-
-parser.parse!
-
-verb = ARGV[0]
-docsetPath = nil
-if ARGV.count >= 2
-	docsetPath = ARGV[1]
-end
-
-if verb == 'help'
-	STDERR.puts parser.help
-	
-	STDERR.puts ""
-	
-	STDERR.puts "Verbs:"
-	STDERR.puts "- help : Displays help about the tool"
-	STDERR.puts "- index: Converts the XML files into a searchable index"
-	STDERR.puts "- search: (not implemented) Search the full text and API indexes for the specified terms"
-	STDERR.puts "- validate: (not implemented) Examines the indexes for all files referenced and verifies that those files exist."
-	STDERR.puts "- dump: (not implemented) Print out the contents of the indexes"
-	STDERR.puts "- package: (not implemented) Generate an archive of the documentation."
-	
-	exit 1
-
-elsif verb == 'index'
 	# First delete any current index
 	indexPath = "#{docsetPath}/Contents/Resources/docSet.dsidx"
 	nodesXMLFile="#{docsetPath}/Contents/Resources/Nodes.xml"
@@ -152,6 +94,13 @@ elsif verb == 'index'
 	FileUtils.rm indexPath, :force => true
 	
 	db = SQLite3::Database.new indexPath
+	
+	# we want performance while filling it up
+	# if power goes out while writing, data can be lost
+	# but this is a massive speedup
+	db.execute("PRAGMA locking_mode = EXCLUSIVE")
+	db.execute("PRAGMA synchronous = 0")
+	
 	
 	# we try to copy a similar system to docsetutil, so we built other classes and use a view for the main table
 	# even though we're not coredata
@@ -357,6 +306,87 @@ elsif verb == 'index'
 	)
 	
 	# and we're done
+end
+
+# Works similar to docsetutil
+# See http://www.manpagez.com/man/1/docsetutil/ though we dont support all verbs
+HELP_BANNER="Usage: doxysetutil [verb] [options] [docsetpath]"
+if ARGV.count == 0
+	STDERR.puts HELP_BANNER
+	exit 1
+end
+
+parser = OptionParser.new do |parser|
+	parser.banner = HELP_BANNER
+	parser.on '-localization=LOC', 'Perform the operation using a particular localization' do |localization|
+		OPTIONS[:localization] = localization
+	end
+
+	parser.on '-skip-text', 'Do not perform the operation for the full-text index.' do |skipText|
+		OPTIONS[:skipText] = skipText
+	end
+
+	parser.on '-skip-api', 'Do not perform the operation for the API index.' do |skipAPI|
+		OPTIONS[:skipAPI] = skipAPI
+	end
+
+	parser.on '-node=NODEPATH', 'Perform the operation only on the documents that reside at or below a location via a : named list' do |node|
+		OPTIONS[:node] = node
+	end
+	
+	parser.on '-verbose', 'Print out addictional information about the operation being performed.' do |v|
+		OPTIONS[:verbose] = v
+	end
+	
+	parser.on '-debug', 'Print out debugging information' do |d|
+		OPTIONS[:debug] = d
+	end
+	
+	parser.on '-profile', 'Will use the gem "stackprof" to profile the action. Will output to stackprof-cpu-doxysetutil.dump .' do |profile|
+		OPTIONS[:profile] = profile
+	end
+end
+
+parser.parse!
+
+verb = ARGV[0]
+docsetPath = nil
+if ARGV.count >= 2
+	docsetPath = ARGV[1]
+end
+
+if OPTIONS[:profile]
+	require 'stackprof'
+end
+
+if verb == 'help'
+	STDERR.puts parser.help
+	
+	STDERR.puts ""
+	
+	STDERR.puts "Verbs:"
+	STDERR.puts "- help : Displays help about the tool"
+	STDERR.puts "- index: Converts the XML files into a searchable index"
+	STDERR.puts "- search: (not implemented) Search the full text and API indexes for the specified terms"
+	STDERR.puts "- validate: (not implemented) Examines the indexes for all files referenced and verifies that those files exist."
+	STDERR.puts "- dump: (not implemented) Print out the contents of the indexes"
+	STDERR.puts "- package: (not implemented) Generate an archive of the documentation."
+	
+	exit 1
+
+elsif verb == 'index'
+	if OPTIONS[:profile]
+		if OPTIONS[:debug]
+			STDERR.puts "Starting profiling"
+		end
+		
+		StackProf.run(mode: :cpu, raw: true, out: 'stackprof-cpu-doxysetutil.dump') do
+			p_createIndex(docsetPath)
+		end
+	else
+		p_createIndex(docsetPath)
+	end
+	
 else
 	STDERR.puts "Unknown/Not implemented verb '#{verb}'. See 'help'."
 	exit 1
